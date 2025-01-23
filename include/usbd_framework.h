@@ -8,8 +8,9 @@ extern "C" {
 
 #include "usbd_driver.h"
 
+void UsbdInit();
+void UsbdPoll();
 
-void USBD_Init();
 
 #ifdef __cplusplus
 }

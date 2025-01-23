@@ -1,6 +1,6 @@
 #include "usbd_driver.h"
 
-void usbdPinsInit() {
+static void usbdPinsInit() {
     //Habilitar clock para GPIOB
     SET_BIT(RCC->AHB1ENR, RCC_AHB1ENR_GPIOBEN);
     //Habilitar Alternate function para USB_OTG_HS PB14 (D-) PB15 (D+)
@@ -11,7 +11,7 @@ void usbdPinsInit() {
     MODIFY_REG(GPIOB->MODER, GPIO_MODER_MODER14 | GPIO_MODER_MODER15, _VAL2FLD(GPIO_MODER_MODER14, 2) | _VAL2FLD(GPIO_MODER_MODER15, 2));
 }
 
-void usbdCoreInit() {
+static void usbdCoreInit() {
     //Habilitar clock para USB core
     SET_BIT(RCC->AHB1ENR, RCC_AHB1ENR_OTGHSEN);
     //Configurar USB core para rodar em device mode e usar embedded full speed PHY
@@ -52,18 +52,123 @@ void usbdCoreInit() {
     SET_BIT(USB_OTG_HS_DEVICE->DOEPMSK, USB_OTG_DOEPMSK_XFRCM);
 }
 
-void connectDevice() {
+static void connectDevice() {
     //Liga o transceiver para on
     SET_BIT(USB_OTG_HS_GLOBAL->GCCFG, USB_OTG_GCCFG_PWRDWN);
     //Conecta dispositivo para o barramento 0 = conectado 1 = disconectado
     CLEAR_BIT(USB_OTG_HS_DEVICE->DCTL, USB_OTG_DCTL_SDIS);
 }
 
-void disconnectDevice() {
+static void disconnectDevice() {
     //Disconecta dispositivo para o barramento 0 = conectado 1 = disconectado
     SET_BIT(USB_OTG_HS_DEVICE->DCTL, USB_OTG_DCTL_SDIS);
     //Desliga o transceiver para off
     CLEAR_BIT(USB_OTG_HS_GLOBAL->GCCFG, USB_OTG_GCCFG_PWRDWN);
+}
+
+//Função para pop de dados do RxFifo
+static void readPacket(void *buffer, uint16_t size) {
+    //Só existe um RxFifo
+    __IO uint32_t *fifo = FIFO(0);
+    //For loop percorrendo cada word no fifo, adicionando um word a cada iteração no buffer
+    for(; size >= 4; size -= 4, buffer += 4 ) {
+        //Pega dado do fifo
+        uint32_t data = *fifo;
+        //Adiciona dado no buffer
+        *((uint32_t*) buffer) = data;
+    }
+    //Se ainda sobrar bytes com menos de um word
+    if(size > 0) {
+        //Pega os últimos bytes remanecentes que são menos de um word
+        uint32_t data = *fifo;
+        //Percorre agora a cada byte, e valor no data sempre tem um shift de 1 byte para a direita
+        //Primeiro pega o bit menos significativo e por último os bits mais significativos
+        for(; size > 0; size--, buffer++, data >>= 8) {
+            //Guarda valor no buffer com alinhamento correto
+            //AND com 0xFF porque quer pegar apenas os ultimos 8 bits de data qué é uma variável de 32 bits
+            *((uint8_t*) buffer) = 0xFF & data;
+        }
+    }
+}
+
+//Função para enviar pacotes para o TxFifo
+static void writePacket(uint16_t endpoint_number, void const *buffer, uint16_t size) {
+    //Inicializa ponteiros para acessar o FIFO e os registradores do endpoint IN correspondente
+    __IO uint32_t *fifo = FIFO(endpoint_number);
+    USB_OTG_INEndpointTypeDef *in_endpoint = IN_ENDPOINT(endpoint_number);
+    //Configurar transmissão Número de pacotes e tamanho da transmissão
+    MODIFY_REG(in_endpoint->DIEPTSIZ,
+            USB_OTG_DIEPTSIZ_PKTCNT | USB_OTG_DIEPTSIZ_XFRSIZ,
+            _VAL2FLD(USB_OTG_DIEPTSIZ_PKTCNT, 1) | _VAL2FLD(USB_OTG_DIEPTSIZ_XFRSIZ, size)      
+        );
+    //Habilita transmissão no endpoint depois de limpar NAK e STALL do endpoint
+    MODIFY_REG(in_endpoint->DIEPCTL,
+            USB_OTG_DIEPCTL_STALL,
+            USB_OTG_DIEPCTL_CNAK | USB_OTG_DIEPCTL_EPENA
+    );
+    //Obtem tamanho em formato de 32 bit words
+    size = (size + 3) / 4;
+    //Loop, enquanto tamanho for maior que zero, a cada word lido incrementar endereço do buffer em 4 posições
+    for(; size > 0; size--, buffer += 4) {
+        //Envia dados ao TxFifo
+        *fifo = *((uint32_t*) buffer);
+    }
+}
+
+//Função vai ser chamada sempre que o tamanho de um TxFIFO muda e atualiza automaticamente todos os endereços dos TxFIFO
+static void setTxFifoAddress() {
+    //Cria variavel de start_address de cada fifo
+    //cada endereço vai ter Fifo_size * 4 de offset entre eles já que é em bytes e o size pe calculado em words
+    //Primeiro endereço começa depois do tamanho do RxFifo
+    uint16_t start_address = _FLD2VAL(USB_OTG_GRXFSIZ_RXFD, USB_OTG_HS_GLOBAL->GRXFSIZ) * 4;
+    //Atualiza start address do TxFifo0
+    MODIFY_REG(USB_OTG_HS_GLOBAL->DIEPTXF0_HNPTXFSIZ, USB_OTG_TX0FSA, _VAL2FLD(USB_OTG_TX0FSA, start_address));
+    //Incrementa start address para o size do fifo anterior
+    start_address += _FLD2VAL(USB_OTG_TX0FD, USB_OTG_HS_GLOBAL->DIEPTXF0_HNPTXFSIZ) * 4;
+    //Loop para configurar o endereço dos outros TxFifo
+    for(uint8_t fifo_number = 0; fifo_number < ENDPOINT_COUNT - 1; fifo_number++) {
+        //configura endereço de endpoint 1 a 8
+        MODIFY_REG(USB_OTG_HS_GLOBAL->DIEPTXF[fifo_number],
+                USB_OTG_DIEPTXF_INEPTXSA,
+                _VAL2FLD(USB_OTG_DIEPTXF_INEPTXSA, start_address)
+        );
+        //incrementa para próxima contagem
+        start_address += _FLD2VAL(USB_OTG_DIEPTXF_INEPTXFD, USB_OTG_HS_GLOBAL->DIEPTXF[fifo_number]) * 4;
+    }
+}
+
+//Todos os endpoints OUT compartilham do mesmo RxFIFO
+static void configureRxFifoSize(uint16_t max_packet_size) {
+    //Tamanho do espaço necessário size é em palavras (words = 32 bits = 4 bytes)
+    //Considera espaço para packets STATUS que usa 10 words 
+    //equação tirada da explicação do manual de referência do STM32F746
+    uint16_t size = 10 + (2 * ((max_packet_size / 4) + 1));
+    //Depois de feito o calculo implementar tamanho do RxFIFO no registrador correspondente 
+    MODIFY_REG(USB_OTG_HS_GLOBAL->GRXFSIZ, 
+    USB_OTG_GRXFSIZ_RXFD, 
+    _VAL2FLD(USB_OTG_GRXFSIZ_RXFD, size)
+    );
+    setTxFifoAddress();
+}
+
+//Cada Endpoint IN tem um TxFIFO dedicado para eles
+static void configureTxFifoSize(uint8_t endpoint_number, uint16_t max_packet_size) {
+    uint16_t size = (max_packet_size + 3) / 4 ;
+    //Configura tamanho do FIFO, endpoint 0 tem um registrador em endereço diferente fora do array
+    if(endpoint_number == 0) {
+        MODIFY_REG(USB_OTG_HS_GLOBAL->DIEPTXF0_HNPTXFSIZ,
+                USB_OTG_TX0FD,
+                _VAL2FLD(USB_OTG_TX0FD, size)
+        );
+    } else {
+        //Registrador é um array todos um seguido do outro na memória
+        //subtraído por 1 porque o endpoint 0 não conta no array
+        MODIFY_REG(USB_OTG_HS_GLOBAL->DIEPTXF[endpoint_number - 1], 
+                USB_OTG_DIEPTXF_INEPTXFD,
+                _VAL2FLD(USB_OTG_DIEPTXF_INEPTXFD, size)
+        );
+    }
+    setTxFifoAddress();
 }
 
 //Limpa fifo de recepção
@@ -95,6 +200,8 @@ static void endpoint0_Config(uint16_t endpoint_size) {
     configureRxFifoSize(MAX_PACKET_SIZE);
     configureTxFifoSize(0, endpoint_size);
 }
+
+
 
 static void inEndpointConfig(uint8_t endpoint_number, UsbTransferType endpoint_type, uint16_t endpoint_size) {
     //Habilitar interrupts do Endpoint IN correspondente
@@ -154,66 +261,58 @@ static void deconfigureEndpoint(uint8_t endpoint_number) {
     flushRxFifo();
 }
 
-//Função vai ser chamada sempre que o tamanho de um TxFIFO muda e atualiza automaticamente todos os endereços dos TxFIFO
-static void setTxFifoAddress() {
-    //Cria variavel de start_address de cada fifo
-    //cada endereço vai ter Fifo_size * 4 de offset entre eles já que é em bytes e o size pe calculado em words
-    //Primeiro endereço começa depois do tamanho do RxFifo
-    uint16_t start_address = _FLD2VAL(USB_OTG_GRXFSIZ_RXFD, USB_OTG_HS_GLOBAL->GRXFSIZ) * 4;
-    //Atualiza start address do TxFifo0
-    MODIFY_REG(USB_OTG_HS_GLOBAL->DIEPTXF0_HNPTXFSIZ, USB_OTG_TX0FSA, _VAL2FLD(USB_OTG_TX0FSA, start_address));
-    //Incrementa start address para o size do fifo anterior
-    start_address += _FLD2VAL(USB_OTG_TX0FD, USB_OTG_HS_GLOBAL->DIEPTXF0_HNPTXFSIZ) * 4;
-    //Loop para configurar o endereço dos outros TxFifo
-    for(uint8_t fifo_number = 0; fifo_number < ENDPOINT_COUNT - 1; fifo_number++) {
-        //configura endereço de endpoint 1 a 8
-        MODIFY_REG(USB_OTG_HS_GLOBAL->DIEPTXF[fifo_number],
-                USB_OTG_DIEPTXF_INEPTXSA,
-                _VAL2FLD(USB_OTG_DIEPTXF_INEPTXSA, start_address)
-        );
-        //incrementa para próxima contagem
-        start_address += _FLD2VAL(USB_OTG_DIEPTXF_INEPTXFD, USB_OTG_HS_GLOBAL->DIEPTXF[fifo_number]) * 4;
-    }
+
+
+static void enumDoneHandler() {
+    //Configurar tamanho de pacote máximo para 8 bytes no endpoint 0
+    endpoint0_Config(8);
 }
 
-//Todos os endpoints OUT compartilham do mesmo RxFIFO
-static void configureRxFifoSize(uint16_t max_packet_size) {
-    //Tamanho do espaço necessário size é em palavras (words = 32 bits = 4 bytes)
-    //Considera espaço para packets STATUS que usa 10 words 
-    //equação tirada da explicação do manual de referência do STM32F746
-    uint16_t size = 10 + (2 * ((max_packet_size / 4) + 1));
-    //Depois de feito o calculo implementar tamanho do RxFIFO no registrador correspondente 
-    MODIFY_REG(USB_OTG_HS_GLOBAL->GRXFSIZ, 
-    USB_OTG_GRXFSIZ_RXFD, 
-    _VAL2FLD(USB_OTG_GRXFSIZ_RXFD, size)
-    );
-    setTxFifoAddress();
-}
 
-//Cada Endpoint IN tem um TxFIFO dedicado para eles
-static void configureTxFifoSize(uint8_t endpoint_number, uint16_t max_packet_size) {
-    uint16_t size = (max_packet_size + 3) / 4 ;
-    //Configura tamanho do FIFO, endpoint 0 tem um registrador em endereço diferente fora do array
-    if(endpoint_number == 0) {
-        MODIFY_REG(USB_OTG_HS_GLOBAL->DIEPTXF0_HNPTXFSIZ,
-                USB_OTG_TX0FD,
-                _VAL2FLD(USB_OTG_TX0FD, size)
-        );
-    } else {
-        //Registrador é um array todos um seguido do outro na memória
-        //subtraído por 1 porque o endpoint 0 não conta no array
-        MODIFY_REG(USB_OTG_HS_GLOBAL->DIEPTXF[endpoint_number - 1], 
-                USB_OTG_DIEPTXF_INEPTXFD,
-                _VAL2FLD(USB_OTG_DIEPTXF_INEPTXFD, size)
-        );
-    }
-    setTxFifoAddress();
-}
 
 static void usbRstHandler() {
     //loop em todos os endpoints e desconfigurar todos eles
     for(uint8_t i = 0; i <= ENDPOINT_COUNT; i++) {
         deconfigureEndpoint(i);
+    }
+}
+
+static void rxflvlHandler() {
+    //Pega informação de status do word do RxFifo
+    uint32_t received_status = USB_OTG_HS_GLOBAL->GRXSTSP;
+    //Obter numero endpoint
+    uint8_t endpoint_number = _FLD2VAL(USB_OTG_GRXSTSP_EPNUM, received_status);
+    //Obter contagem de bytes recebido no pacote de dados
+    uint16_t bytes_count = _FLD2VAL(USB_OTG_GRXSTSP_BCNT, received_status);
+    //obter status do pacote
+    uint8_t packet_status = _FLD2VAL(USB_OTG_GRXSTSP_PKTSTS, received_status);
+    switch (packet_status)
+    {
+    //caso receba um pacote SETUP seguido de dados
+    case STATUS_SETUP_PKT_RCVD:
+        //TODO
+        break;
+    //caso receba um pacote OUT seguido de dados
+    case STATUS_OUT_PKT_RCVD:
+        //TODO
+        break;
+    //estágio de SETUP foi completado
+    case STATUS_SETUP_PKT_COMPLETED:
+    //Reabilita a transmissão no endpoint
+    //Pelo manual de referência o core limpa esse bit sempre SETUP ou uma transferência é completa
+        SET_BIT(OUT_ENDPOINT(endpoint_number)->DOEPCTL, 
+                USB_OTG_DOEPCTL_EPENA | USB_OTG_DOEPCTL_CNAK
+            );
+        break;
+    //Estágio de OUT foi completado
+    case STATUS_OUT_PKT_COMPLETED:
+    //Mesma coisa reabilitar transmissão no endpoint
+        SET_BIT(OUT_ENDPOINT(endpoint_number)->DOEPCTL, 
+                USB_OTG_DOEPCTL_EPENA | USB_OTG_DOEPCTL_CNAK
+            );
+        break;
+    default:
+        break;
     }
 }
 
@@ -233,11 +332,16 @@ void globalIntHandler() {
     }
     //interrupt enumeration
     else if(gintsts & USB_OTG_GINTSTS_ENUMDNE) {
-
+        enumDoneHandler();
+        //limpa a interrupção valor 1 = limpa
+        SET_BIT(USB_OTG_HS_GLOBAL->GINTSTS, USB_OTG_GINTSTS_ENUMDNE);
     }
     //interrupt rx fifo non empty
     else if(gintsts & USB_OTG_GINTSTS_RXFLVL) {
-
+        //Limpa interrupt
+        rxflvlHandler();
+        //limpa a interrupção valor 1 = limpa
+        SET_BIT(USB_OTG_HS_GLOBAL->GINTSTS, USB_OTG_GINTSTS_RXFLVL);
     }
     //interrupt IN endpoint
     else if(gintsts & USB_OTG_GINTSTS_IEPINT) {
@@ -248,3 +352,17 @@ void globalIntHandler() {
 
     }
 }
+
+//Declarando instância que vai ser usada em outras camadas
+const UsbDriver usb_driver = {
+    .connectDevice = &connectDevice,
+    .disconnectDevice = &disconnectDevice,
+    .flushRxFifo = &flushRxFifo,
+    .flushTxFifo = &flushTxFifo,
+    .usbdCoreInit = &usbdCoreInit,
+    .usbdPinsInit = &usbdPinsInit,
+    .writePacket = &writePacket,
+    .readPacket = &readPacket,
+    .inEndpointConfig = &inEndpointConfig,
+    .poll = &globalIntHandler
+};

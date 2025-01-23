@@ -25,6 +25,11 @@ extern "C" {
 //constante para posições endpoint 0 IN e OUT no registrador de interrupção mask
 #define USB_OTG_DAINTMSK_INEN0 (1 << 0)
 #define USB_OTG_DAINTMSK_OUTEN0 (1 << 16)
+//Definir constantes para status pacotes
+#define STATUS_SETUP_PKT_RCVD 0x06 
+#define STATUS_OUT_PKT_RCVD 0x02
+#define STATUS_SETUP_PKT_COMPLETED 0x04
+#define STATUS_OUT_PKT_COMPLETED 0x03
 
 //Funções para calcular estrutura de registradores de configuração de endpoints IN e OUT
 //Função apenas retorna o ponteiro para a posição na memória onde está o registrador
@@ -54,10 +59,23 @@ inline static __IO uint32_t* FIFO(uint8_t endpoint_number) {
 #define OUT_EP_REG_CONFIG(SIZE, TYPE) USB_OTG_DOEPCTL_USBAEP | _VAL2FLD(USB_OTG_DOEPCTL_MPSIZ, SIZE) \
         | USB_OTG_DOEPCTL_SNAK | _VAL2FLD(USB_OTG_DOEPCTL_EPTYP, TYPE) | USB_OTG_DOEPCTL_SD0PID_SEVNFRM
         
-void usbdPinsInit();
-void usbdCoreInit();
-void connectDevice();
-void disconnectDevice();
+//Funções do driver que vão ser expostas para a camada superior
+typedef struct {
+    void (*usbdPinsInit)();
+    void (*usbdCoreInit)();
+    void (*connectDevice)();
+    void (*disconnectDevice)();
+    void (*readPacket)(void *buffer, uint16_t size);
+    void (*writePacket)(uint16_t endpoint_number, void const *buffer, uint16_t size);
+    void (*flushRxFifo)();
+    void (*flushTxFifo)(uint8_t endpoint_number);
+    void (*inEndpointConfig)(uint8_t endpoint_number, UsbTransferType endpoint_type, uint16_t endpoint_size);
+    void (*poll)(); //Função para escanear o barramento com mudanças nos registradores de interrupts
+    //TODO adicionar ponteiros para as outras funções do driver
+} UsbDriver;
+
+//instância para chamar as funções do driver
+extern const UsbDriver usb_driver;
 
 #ifdef __cplusplus
 }
