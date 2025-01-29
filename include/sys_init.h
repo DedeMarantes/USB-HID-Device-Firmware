@@ -1,14 +1,14 @@
 #ifndef SYS_INIT_H
 #define SYS_INIT_H
 
-#include "system_stm32f7xx.h"
-#include "stm32f746xx.h"
+
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-uint32_t SystemCoreClock = 12000000;
+#include "system_stm32f7xx.h"
+#include "stm32f746xx.h"
 
 #define PLL_CONFIG \
 (_VAL2FLD(RCC_PLLCFGR_PLLM, 15) | _VAL2FLD(RCC_PLLCFGR_PLLN, 144) | _VAL2FLD(RCC_PLLCFGR_PLLP, 0) \

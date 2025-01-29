@@ -7,7 +7,8 @@ extern "C" {
 #endif
 
 #include "stm32f746xx.h"
-#include "usb_types.h"
+#include "usb_config_types.h"
+#include "strings.h"
 //Pelo datasheet o endereço base do USB OTG na velocidade high speed começa no endereço 0x40040000 
 //Assim a parte global começa na base + offset base que é 0
 #define USB_OTG_HS_GLOBAL ((USB_OTG_GlobalTypeDef*) (USB_OTG_HS_PERIPH_BASE + USB_OTG_GLOBAL_BASE))
@@ -71,11 +72,14 @@ typedef struct {
     void (*flushTxFifo)(uint8_t endpoint_number);
     void (*inEndpointConfig)(uint8_t endpoint_number, UsbTransferType endpoint_type, uint16_t endpoint_size);
     void (*poll)(); //Função para escanear o barramento com mudanças nos registradores de interrupts
+    void (*setDeviceAddress) (uint8_t address);
     //TODO adicionar ponteiros para as outras funções do driver
 } UsbDriver;
 
 //instância para chamar as funções do driver
 extern const UsbDriver usb_driver;
+//Variavel para tratar os eventos, que é ativado pela camada de driver e o handler é implementado na camada framework
+extern UsbEvents usb_events;
 
 #ifdef __cplusplus
 }

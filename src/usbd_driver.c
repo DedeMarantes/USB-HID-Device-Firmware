@@ -52,6 +52,14 @@ static void usbdCoreInit() {
     SET_BIT(USB_OTG_HS_DEVICE->DOEPMSK, USB_OTG_DOEPMSK_XFRCM);
 }
 
+static void setDeviceAddress(uint8_t address) {
+    //Seta endereço para dispositivo
+    MODIFY_REG(USB_OTG_HS_DEVICE->DCFG,
+        USB_OTG_DCFG_DAD,
+        _VAL2FLD(USB_OTG_DCFG_DAD, address)
+        );
+}
+
 static void connectDevice() {
     //Liga o transceiver para on
     SET_BIT(USB_OTG_HS_GLOBAL->GCCFG, USB_OTG_GCCFG_PWRDWN);
@@ -275,6 +283,8 @@ static void usbRstHandler() {
     for(uint8_t i = 0; i <= ENDPOINT_COUNT; i++) {
         deconfigureEndpoint(i);
     }
+    //Chama função handler para reset implementada pelo framework
+    usb_events.usbResetReceived();
 }
 
 static void rxflvlHandler() {
@@ -290,7 +300,8 @@ static void rxflvlHandler() {
     {
     //caso receba um pacote SETUP seguido de dados
     case STATUS_SETUP_PKT_RCVD:
-        //TODO
+        //função implementada na camada framework
+        usb_events.setupDataReceived(endpoint_number, bytes_count);
         break;
     //caso receba um pacote OUT seguido de dados
     case STATUS_OUT_PKT_RCVD:
@@ -316,6 +327,33 @@ static void rxflvlHandler() {
     }
 }
 
+//Função quando transferência no endpoint IN é completada
+static void inepintHandler() {
+    //ffs busca primeiro bit menos significativo setado
+    //começa  do indice 1 então é subtraído 1 porque tem que incluir endpoint 0
+    //Registrador é dividido nos primeiros 2 bytes cada bit representa um número de ep setado
+    uint8_t endpoint_number = ffs(USB_OTG_HS_DEVICE->DAINT) - 1;
+    //Quando transferência estiver completa
+    if(IN_ENDPOINT(endpoint_number)->DIEPINT & USB_OTG_DIEPINT_XFRC) {
+        //Chama função para evento
+        usb_events.inTransferComplete(endpoint_number);
+        //Limpa flag de interrupt
+        SET_BIT(IN_ENDPOINT(endpoint_number)->DIEPINT, USB_OTG_DIEPINT_XFRC);
+    }
+}
+
+//Função quando transferência no endpoint OUT é completada
+static void oepintHandler() {
+    //Registrador é dividido nos  últimos 2 bytes cada bit representa um número de ep out setado
+    uint8_t endpoint_number = ffs(USB_OTG_HS_DEVICE->DAINT >> 16) - 1;
+    //Quando transferência estiver completa
+    if(OUT_ENDPOINT(endpoint_number)->DOEPINT & USB_OTG_DOEPINT_XFRC) {
+        //Chama função para evento
+        usb_events.outTransferComplete(endpoint_number);
+        //Limpa flag de interrupt
+        SET_BIT(OUT_ENDPOINT(endpoint_number)->DOEPINT, USB_OTG_DOEPINT_XFRC);
+    }
+}
 //Handles Global interrupts handlers
 void globalIntHandler() {
     //Variavel para guardar valor do registrador
@@ -345,12 +383,19 @@ void globalIntHandler() {
     }
     //interrupt IN endpoint
     else if(gintsts & USB_OTG_GINTSTS_IEPINT) {
-
+        inepintHandler();
+        //limpa a interrupção valor 1 = limpa
+        SET_BIT(USB_OTG_HS_GLOBAL->GINTSTS, USB_OTG_GINTSTS_IEPINT);
     }
     //interrupt OUT endpoint
     else if(gintsts & USB_OTG_GINTSTS_OEPINT) {
-
+        oepintHandler();
+        //limpa a interrupção valor 1 = limpa
+        SET_BIT(USB_OTG_HS_GLOBAL->GINTSTS, USB_OTG_GINTSTS_OEPINT);
     }
+
+    //Depois de checado todos as interrupções encerrar ciclo de polling
+    usb_events.usbPolled();
 }
 
 //Declarando instância que vai ser usada em outras camadas
@@ -364,5 +409,6 @@ const UsbDriver usb_driver = {
     .writePacket = &writePacket,
     .readPacket = &readPacket,
     .inEndpointConfig = &inEndpointConfig,
-    .poll = &globalIntHandler
+    .poll = &globalIntHandler,
+    .setDeviceAddress = &setDeviceAddress
 };

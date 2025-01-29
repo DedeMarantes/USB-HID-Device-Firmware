@@ -4,6 +4,9 @@ APB1 = 4, APB2 = 2
 AHB = 1 valor default nem precisa alterar*/
 #include "sys_init.h"
 //Registrador PLLP 0 = divisor 2
+
+uint32_t SystemCoreClock = 12000000;
+
 void configureClock() {
     //alterando valor de latencia no registrador FLASH_ACR para 3 wait states
     MODIFY_REG(FLASH->ACR, FLASH_ACR_LATENCY, FLASH_ACR_LATENCY_3WS << FLASH_ACR_LATENCY_Pos);

@@ -7,8 +7,10 @@ extern "C" {
 #endif
 
 #include "usbd_driver.h"
+#include "stdio.h"
+#include "usbd_descriptors.h"
 
-void UsbdInit();
+void UsbdInit(UsbDeviceType *usb_device);
 void UsbdPoll();
 
 
