@@ -75,7 +75,7 @@ static void disconnectDevice() {
 }
 
 //Função para pop de dados do RxFifo
-static void readPacket(void *buffer, uint16_t size) {
+static void readPacket(const void *buffer, uint16_t size) {
     //Só existe um RxFifo
     __IO uint32_t *fifo = FIFO(0);
     //For loop percorrendo cada word no fifo, adicionando um word a cada iteração no buffer

@@ -6,6 +6,8 @@ extern "C" {
 #endif
 #include <stdint.h>
 #include "usbd_descriptors.h"
+//Definindo macro para definir tamanho do pacote a ser escrito
+#define MIN(a,b) ((a < b) ? a : b)
 //Tipos de transferência USB
 typedef enum {
     USB_TRANSFER_TYPE_CONTROL,
@@ -53,9 +55,9 @@ typedef struct {
     //Configuração usb selecionada
     uint8_t config_value;
     //Ponteiros para buffers IN e OUT
-    void *ptr_out_buffer;
+    void const *ptr_out_buffer;
     uint32_t out_data_size; 
-    void *ptr_in_buffer;
+    void const *ptr_in_buffer;
     uint32_t in_data_size;
 } UsbDeviceType;
 
@@ -109,6 +111,7 @@ typedef struct {
 #define USB_DESCRIPTOR_TYPE_DEVICE_QUALIFIER 0x06
 #define USB_DESCRIPTOR_TYPE_OTHER_SPEED_CONFIGURATION 0x07
 #define USB_DESCRIPTOR_TYPE_INTERFACE_POWER 0x08
+#define USB_DESCRIPTOR_TYPE_HID 0x21
 
 // Constantes para definir códigos das classes USB
 #define USB_CLASS_PER_INTERFACE 0x00       // Class code for a device that uses a class specification interface

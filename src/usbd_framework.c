@@ -4,7 +4,7 @@
  assim não precisa colocar esse parametro em todas as funções é um ponteiro */
 static UsbDeviceType *usb_handle;
 
-void printSetupData(uint8_t *buffer, size_t byte_count) {
+void printSetupData(const uint8_t *buffer, size_t byte_count) {
     printf("SETUP data: ");
     for (size_t i = 0; i < byte_count; i++) {
         printf("%02X ", buffer[i]); // Exibe cada byte em hexadecimal com 2 dígitos
@@ -25,6 +25,10 @@ void UsbdPoll() {
     usb_driver.poll();
 }
 
+void usbdConfigure() {
+    
+}
+
 static void processStandardDeviceReq() {
     UsbDeviceRequest const *request = usb_handle->ptr_out_buffer;
     //Analisar qual request específico o device recebeu 
@@ -35,6 +39,8 @@ static void processStandardDeviceReq() {
             const uint8_t descriptor_type = request->wValue >> 8;
             //Pegar tamanho em bytes dos dados que serão transferidos no data stage se houver
             const uint16_t length = request->wLength;
+            //Últimos 8 bits são o indice do descritor
+            //const uint8_t descriptor_index = request->wValue & 0xFF;
             switch(descriptor_type) {
                 case USB_DESCRIPTOR_TYPE_DEVICE:
                 //ponteiro para buffer onde vai ser transmitido dados do TxFIFO para host
@@ -44,8 +50,40 @@ static void processStandardDeviceReq() {
                 //Altera estágio para DATA IN
                     usb_handle->usb_control_stage = USB_CONTROL_STAGE_DATA_IN;
                     break;
+                case USB_DESCRIPTOR_TYPE_CONFIGURATION:
+                //ponteiro para buffer onde vai ser transmitido dados do TxFIFO para host
+                /*Esse descritor terá combinado:
+                Configuration descriptor
+                Interface descriptor
+                Endpoint descriptor 
+                HID descriptor
+                todos eles serão enviados de uma vez
+                */
+                    usb_handle->ptr_in_buffer = &configuration_descriptor;
+                //Tamanho
+                    usb_handle->in_data_size = length;
+                //Altera estágio para DATA IN
+                    usb_handle->usb_control_stage = USB_CONTROL_STAGE_DATA_IN;
+                    break;
             }
-            //TODO
+            break;
+        case SET_ADDRESS:;
+        //extraindo valor do endereço definido pelo host no request
+            const uint16_t device_address = request->wValue;
+        //aplicando função no driver para setar endereço no dispositivo
+            usb_driver.setDeviceAddress((uint8_t) device_address);
+        //Altera estado de default para addressed
+            usb_handle->usb_device_state = USB_DEVICE_STATE_ADRESSED;
+        //Estágio status sempre oposto ao de data stage então como é uma transferência out status é IN
+            usb_handle->usb_control_stage = USB_CONTROL_STAGE_STATUS_IN;
+            break;
+        case SET_CONFIGURATION:;
+        //Setando valor da configuração que é recebido no request
+            usb_handle->config_value = request->wValue;
+            usbdConfigure();
+        //Troca estado de addressed para configured
+            usb_handle->usb_device_state = USB_DEVICE_STATE_CONFIGURED;
+            usb_handle->usb_control_stage = USB_CONTROL_STAGE_STATUS_IN;
             break;
     }
 }
@@ -59,7 +97,8 @@ static void processControlTransferStage() {
         case USB_CONTROL_STAGE_DATA_IN:;
         //escrevendo dados do txfifo para o endpoint 0
         //Buffer pode ter tamanho maior que o tamanho máximo por pacotes
-            uint8_t data_size = device_descriptor.bMaxPacketSize0;
+        //Se tamanho for menor que  o tamanho máximo do pacote é porque é o ultimo a ser escrito
+            uint8_t data_size = MIN(usb_handle->in_data_size,device_descriptor.bMaxPacketSize0);
             usb_driver.writePacket(0, usb_handle->ptr_in_buffer, (uint8_t) data_size);
         //subtraindo size do buffer pelo número de dados escritos
             usb_handle->in_data_size -= data_size;
@@ -67,9 +106,29 @@ static void processControlTransferStage() {
             usb_handle->ptr_in_buffer += data_size;
         //estágio intermediário para evitar de sempre ser escrito no buffer quando a função é chamada
             usb_handle->usb_control_stage = USB_CONTROL_STAGE_DATA_IN_IDLE;
+            //Se tamanho for 0 depois alterado o tamanho 
+            //ou seja se o tamanho so buffer restante for igual ao tamanho máximo do pacote 
+            if(usb_handle->in_data_size == 0) {
+                if(data_size == device_descriptor.bMaxPacketSize0) {
+                    usb_handle->usb_control_stage = USB_CONTROL_STAGE_DATA_IN_ZERO;
+                }
+                //Se tamanho restante for menor que o máximo acaba a transferência
+                else {
+                    usb_handle->usb_control_stage = USB_CONTROL_STAGE_STATUS_OUT;
+                }
+            }
+            break;
+        //esse estágio só volta para o setup stage para esperar por mais pacotes
+        case  USB_CONTROL_STAGE_STATUS_OUT:
+            usb_handle->usb_control_stage = USB_CONTROL_STAGE_SETUP;
             break;
         //esse estágio não faz nada só espera pelo host ler os dados enviados no endpoint 0
         case USB_CONTROL_STAGE_DATA_IN_IDLE:
+            break;
+        case USB_CONTROL_STAGE_STATUS_IN:
+        //envia pacote de dados de tamanho 0
+            usb_driver.writePacket(0, NULL, 0);
+            usb_handle->usb_control_stage = USB_CONTROL_STAGE_SETUP;
             break;
     }
 }
@@ -100,10 +159,27 @@ static void resetHandler() {
     usb_driver.setDeviceAddress(0);
 }
 
+
+
 static void usbPolledHandler() {
     //sempre que for fazer polling no bus ver quais mudanças de estado teve
     processControlTransferStage();
 }
+
+static void inTransferCompleteHandler(uint8_t endpoint_number) {
+    //Se ainda tem dados para ser transmitidos para o host
+    if(usb_handle->in_data_size) {
+        //Trocar estágio para voltar a escrever pacotes para envio para o host
+        usb_handle->usb_control_stage = USB_CONTROL_STAGE_DATA_IN;
+    }
+    //conferir se estiver estágio DATA_IN_ZERO e apenas escrever um pacote vazio para encerrar transferência
+    else if(usb_handle->usb_control_stage == USB_CONTROL_STAGE_DATA_IN_ZERO) {
+        usb_driver.writePacket(0, NULL, 0);
+        usb_handle->usb_control_stage = USB_CONTROL_STAGE_STATUS_OUT;
+    }
+}
+
+static void outTransferCompleteHandler(uint8_t endpoint_number) {}
 
 static void setupDataReceived(uint8_t endpoint_number, uint16_t byte_count) {
     //Vai ler o conteudo do RxFifo e guardar em um buffer usando função implementada no driver
@@ -118,6 +194,8 @@ static void setupDataReceived(uint8_t endpoint_number, uint16_t byte_count) {
 UsbEvents usb_events = {
     .usbResetReceived = &resetHandler,
     .setupDataReceived = &setupDataReceived,
-    .usbPolled = &usbPolledHandler
+    .usbPolled = &usbPolledHandler,
+    .inTransferComplete = &inTransferCompleteHandler,
+    .outTransferComplete = &outTransferCompleteHandler
     //TODO
 };

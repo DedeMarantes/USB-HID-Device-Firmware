@@ -66,7 +66,7 @@ typedef struct {
     void (*usbdCoreInit)();
     void (*connectDevice)();
     void (*disconnectDevice)();
-    void (*readPacket)(void *buffer, uint16_t size);
+    void (*readPacket)(const void *buffer, uint16_t size);
     void (*writePacket)(uint16_t endpoint_number, void const *buffer, uint16_t size);
     void (*flushRxFifo)();
     void (*flushTxFifo)(uint8_t endpoint_number);
