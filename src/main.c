@@ -6,11 +6,6 @@
 UsbDeviceType usb_device;
 uint32_t buffer_received[8]; //buffer para armazenar os dados pegos no RxFifo
 
-typedef struct {
-    uint8_t x_value;
-    uint8_t y_value;
-    uint8_t buttons;
-} HID_Report;
 
 int main() {
     configureMCO1();

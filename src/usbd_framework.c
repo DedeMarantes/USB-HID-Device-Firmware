@@ -26,7 +26,16 @@ void UsbdPoll() {
 }
 
 void usbdConfigure() {
-    
+    //Configurar endpoint com base nos descritores enviados para o host
+    usb_driver.inEndpointConfig(
+        (configuration_descriptor.usb_endpoint_descriptor.bEndpointAddress & 0x0F), 
+        (configuration_descriptor.usb_configuration_descriptor.bmAttributes & 0x03),
+        configuration_descriptor.usb_endpoint_descriptor.wMaxPacketSize
+         );
+    //depois de configurado enviar pacote vazio para host nesse endpoint conforme manual referência
+    usb_driver.writePacket(
+        (configuration_descriptor.usb_endpoint_descriptor.bEndpointAddress & 0x0F),
+        NULL, 0);
 }
 
 static void processStandardDeviceReq() {
@@ -133,6 +142,30 @@ static void processControlTransferStage() {
     }
 }
 
+//Processar requests específicos de classe
+static void processClassInterfaceReq() {
+    UsbDeviceRequest const *request = usb_handle->ptr_out_buffer;
+    //Analisar qual request específico a interface recebeu
+    switch(request->bRequest) {
+        //Set idle request
+        case HID_SET_IDLE:
+            usb_handle->usb_control_stage = USB_CONTROL_STAGE_STATUS_IN;
+            break;
+    }
+}
+
+//Função para lidar com request standard para uma interface
+static void processStandardInterfaceReq() {
+    UsbDeviceRequest const *request = usb_handle->ptr_out_buffer;
+    switch(request->wValue >> 8) {
+        case USB_DESCRIPTOR_TYPE_HID_REPORT:
+            usb_handle->ptr_in_buffer = &hid_report_descriptor;
+            usb_handle->in_data_size = hid_report_descriptor_size;
+            usb_handle->usb_control_stage = USB_CONTROL_STAGE_DATA_IN;
+            break;
+    }
+}
+
 //Função para processar request usb
 static void processRequest() {
     //Variavel para apontar para o buffer onde foi pego os dados do RxFifo que veio do host
@@ -143,7 +176,14 @@ static void processRequest() {
         case (USB_BM_REQUEST_RECIPIENT_DEVICE | USB_BM_REQUEST_TYPE_STANDARD):
             processStandardDeviceReq();
             break;
-
+        //Para request específico da classe que no caso é HID 
+        //que vai ser só para uma interface específica e não pro device
+        case (USB_BM_REQUEST_TYPE_CLASS | USB_BM_REQUEST_RECIPIENT_INTERFACE):
+            processClassInterfaceReq();
+            break;
+        case (USB_BM_REQUEST_TYPE_STANDARD | USB_BM_REQUEST_RECIPIENT_INTERFACE):
+            processStandardInterfaceReq();
+            break;
     }
 }
 
@@ -166,6 +206,17 @@ static void usbPolledHandler() {
     processControlTransferStage();
 }
 
+static void writeMouseReport() {
+    HID_Report hid_report = {
+        .x_value = 5,
+    };
+    usb_driver.writePacket(
+        (configuration_descriptor.usb_endpoint_descriptor.bEndpointAddress & 0x0F),
+        &hid_report,
+        sizeof(hid_report)
+    );
+}
+
 static void inTransferCompleteHandler(uint8_t endpoint_number) {
     //Se ainda tem dados para ser transmitidos para o host
     if(usb_handle->in_data_size) {
@@ -176,6 +227,10 @@ static void inTransferCompleteHandler(uint8_t endpoint_number) {
     else if(usb_handle->usb_control_stage == USB_CONTROL_STAGE_DATA_IN_ZERO) {
         usb_driver.writePacket(0, NULL, 0);
         usb_handle->usb_control_stage = USB_CONTROL_STAGE_STATUS_OUT;
+    }
+    //Checar se endpoint é o de número 3 onde vai ser feito transferência de dados
+    if(endpoint_number == (configuration_descriptor.usb_endpoint_descriptor.bEndpointAddress & 0x0F)) {
+        writeMouseReport(); //Envia report do mouse
     }
 }
 

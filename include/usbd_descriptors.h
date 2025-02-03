@@ -6,7 +6,7 @@ extern "C" {
 #endif
 #include "usb_config_types.h"
 
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint8_t bLength; //Tamanho do descriptor em bytes
     uint8_t bDescriptorType; //Device descriptor type
     uint16_t bcdUsb; //release da especificação usb
@@ -23,7 +23,8 @@ typedef struct {
     uint8_t bNumConfigurations; //Número de configurações possíveis
 } UsbDeviceDescriptor;
 
-typedef struct {
+//Precisa evitar o padding do compilador para que seja calculado o size certo
+typedef struct __attribute__((packed)) {
     uint8_t bLength; //tamanho do descritor em bytes
     uint8_t bDescriptorType; // tipo do descritor de configuração
     uint16_t wTotalLength; //Tamanho total dos dados dos descritores que vão ser enviados (endpoint, interface e configuration)
@@ -39,7 +40,7 @@ typedef struct {
 #define USB_CONFIG_ATTR_REMOTE_WKUP (1 << 5) | 0x80 //Suporta wakeup remoto
 #define USB_CONFIG_ATTR_BUS_PWRD 0x80 //recebe energia do barramento
 
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint8_t bLength;               // Tamanho do descritor (em bytes)
     uint8_t bDescriptorType;       // Tipo do descritor (0x04 para Interface Descriptor)
     uint8_t bInterfaceNumber;      // Número da interface
@@ -51,7 +52,7 @@ typedef struct {
     uint8_t iInterface;            // Índice da string de descrição da interface
 } UsbInterfaceDescriptor;
 
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint8_t bLength;               // Tamanho do descritor (em bytes)
     uint8_t bDescriptorType;       // Tipo do descritor (0x05 para Endpoint Descriptor)
     uint8_t bEndpointAddress;      // Endereço do endpoint (bit 7: direção, bits 3..0: número do endpoint)
@@ -61,7 +62,7 @@ typedef struct {
 } UsbEndpointDescriptor;
 
 //Descritor específico para a classe HID e não entra como especificação do USB como os outros
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint8_t bLength; // Tamanho descritor em bytes
     uint8_t bDescriptorType; // tipo de descritor
     uint16_t bcdHID; // Versão da especificação HID (em formato BCD)
@@ -72,15 +73,17 @@ typedef struct {
 } UsbHidDescriptor;
 
 
-typedef struct {
+typedef struct __attribute__((packed)) {
     UsbConfigurationDescriptor usb_configuration_descriptor;
     UsbInterfaceDescriptor usb_interface_descriptor;
-    UsbEndpointDescriptor usb_endpoint_descriptor;
     UsbHidDescriptor usb_hid_descriptor;
+    UsbEndpointDescriptor usb_endpoint_descriptor;
 } UsbConfigurationFullPacket;
 
 extern const UsbDeviceDescriptor device_descriptor;
 extern const UsbConfigurationFullPacket configuration_descriptor;
+extern const uint8_t hid_report_descriptor[50];
+extern const uint16_t hid_report_descriptor_size;
 
 
 #ifdef __cplusplus

@@ -19,7 +19,7 @@ const UsbDeviceDescriptor device_descriptor = {
 };
 
 //Report descriptor para um mouse
-const uint8_t hid_report_descriptor[] = {
+const uint8_t hid_report_descriptor[50] = {
     0x05, 0x01, // Usage Page (Generic Desktop)
     0x09, 0x02, // Usage (Mouse)
     0xA1, 0x01, // Collection (Application)
@@ -48,6 +48,8 @@ const uint8_t hid_report_descriptor[] = {
     0xC0        // End Collection
 };
 
+const uint16_t hid_report_descriptor_size = sizeof(hid_report_descriptor);
+
 const UsbConfigurationFullPacket configuration_descriptor = {
 //Criando configuration descriptor do dispositivo nesse dispositivo só tem uma configuração
     .usb_configuration_descriptor = {
@@ -72,16 +74,7 @@ const UsbConfigurationFullPacket configuration_descriptor = {
         .bInterfaceProtocol = USB_PROTOCOL_NONE,
         .iInterface = 0
     },
-    //Criando endpoint descriptor para ser enviado
-    .usb_endpoint_descriptor = {
-        .bLength = sizeof(UsbEndpointDescriptor),
-        .bDescriptorType = USB_DESCRIPTOR_TYPE_ENDPOINT,
-        .bEndpointAddress = 0x83, // Endpoint 3 IN
-        .bmAttributes = (uint8_t) USB_TRANSFER_TYPE_INTERRUPT,
-        .wMaxPacketSize = 64,
-        .bInterval = 50 // Intervalo de 50 frames de polling no endpoint
-    },
-    //Criando o HID descriptor para o host
+        //Criando o HID descriptor para o host
     .usb_hid_descriptor = {
         .bLength = sizeof(UsbHidDescriptor),
         .bDescriptorType = USB_DESCRIPTOR_TYPE_HID,
@@ -90,5 +83,14 @@ const UsbConfigurationFullPacket configuration_descriptor = {
         .bNumDescriptors = 1, // 1 report descriptor
         .bDescriptorType2 = 0x22, //tipo 0x22 = Report descriptor
         .wDescriptorLength = sizeof(hid_report_descriptor)
+    },
+    //Criando endpoint descriptor para ser enviado
+    .usb_endpoint_descriptor = {
+        .bLength = sizeof(UsbEndpointDescriptor),
+        .bDescriptorType = USB_DESCRIPTOR_TYPE_ENDPOINT,
+        .bEndpointAddress = 0x83, // Endpoint 3 IN
+        .bmAttributes = (uint8_t) USB_TRANSFER_TYPE_INTERRUPT,
+        .wMaxPacketSize = 64,
+        .bInterval = 50 // Intervalo de 50 frames de polling no endpoint
     }
 };

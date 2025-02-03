@@ -101,6 +101,13 @@ typedef struct {
 #define GET_INTERFACE 0x0A
 #define SET_INTERFACE 0x0B
 
+//Constantes para definir requests específicos do HID
+#define HID_GET_REPORT 0x01
+#define HID_GET_IDLE       0x02
+#define HID_GET_PROTOCOL   0x03
+#define HID_SET_REPORT     0x09
+#define HID_SET_IDLE       0x0A
+#define HID_SET_PROTOCOL   0x0B
 
 // Constantes para definir tipos de descriptors
 #define USB_DESCRIPTOR_TYPE_DEVICE 0x01
@@ -112,6 +119,7 @@ typedef struct {
 #define USB_DESCRIPTOR_TYPE_OTHER_SPEED_CONFIGURATION 0x07
 #define USB_DESCRIPTOR_TYPE_INTERFACE_POWER 0x08
 #define USB_DESCRIPTOR_TYPE_HID 0x21
+#define USB_DESCRIPTOR_TYPE_HID_REPORT 0x22
 
 // Constantes para definir códigos das classes USB
 #define USB_CLASS_PER_INTERFACE 0x00       // Class code for a device that uses a class specification interface
@@ -144,6 +152,13 @@ typedef struct {
 #define USB_PROTOCOL_NONE 0x00
 #define USB_PROTOCOL_IAD 0x01
 #define USB_PROTOCOL_VENDOR 0xFF
+
+//Estrutura do mouse
+typedef struct {
+    uint8_t x_value;
+    uint8_t y_value;
+    uint8_t buttons;
+} HID_Report;
 
 #ifdef __cplusplus
 }
